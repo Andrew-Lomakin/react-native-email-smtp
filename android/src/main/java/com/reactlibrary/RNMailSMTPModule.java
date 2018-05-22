@@ -37,8 +37,6 @@ import java.security.AccessController;
 import android.util.Log;
 import android.os.StrictMode;
 
-// String fileurl = "/sdcard/Download/1.pdf";
-
 public class RNMailSMTPModule extends ReactContextBaseJavaModule {
 
   private final ReactApplicationContext reactContext;
@@ -66,8 +64,8 @@ public class RNMailSMTPModule extends ReactContextBaseJavaModule {
       String from = obj.getString("from");
       String to = obj.getString("to");
       Boolean attachment = obj.getBoolean("attachment");
-      String format = obj.getString("format");
-      
+      String format = obj.getString("format");  
+
       @Override
       public void run() {
         StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitAll().build();
