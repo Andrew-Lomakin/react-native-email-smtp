@@ -7,35 +7,14 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.bridge.ReadableArray;
 
-import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.security.Security;
 import java.util.Properties;
+import android.os.AsyncTask;
 
-import javax.activation.DataHandler;
-import javax.activation.DataSource;
-import javax.activation.FileDataSource;
-import javax.mail.Multipart;
-import javax.mail.Message;
-import javax.mail.PasswordAuthentication;
-import javax.mail.Session;
-import javax.mail.Transport;
-import javax.mail.internet.InternetAddress;
-import javax.mail.internet.MimeBodyPart;
-import javax.mail.internet.MimeMessage;
-import javax.mail.internet.MimeMultipart;
-
-import java.util.ArrayList;
-
-import java.security.Provider;
-import java.security.AccessController;
-
-import android.util.Log;
-import android.os.StrictMode;
+import javax.mail.*;
+import javax.mail.internet.*;
+import javax.activation.*;
 
 public class RNMailSMTPModule extends ReactContextBaseJavaModule {
 
@@ -53,7 +32,7 @@ public class RNMailSMTPModule extends ReactContextBaseJavaModule {
 
   @ReactMethod
   public void sendMail(final ReadableMap obj, final Promise promise){
-    getCurrentActivity().runOnUiThread(new Runnable() {
+      AsyncTask.execute(new Runnable() {
 
       String mailhost = obj.getString("mailhost");
       String port = obj.getString("port");
@@ -62,142 +41,82 @@ public class RNMailSMTPModule extends ReactContextBaseJavaModule {
       String password = obj.getString("password");
       String subject = obj.getString("subject");
       String from = obj.getString("from");
-      String to = obj.getString("to");
+      String recipients = obj.getString("recipients");
       Boolean attachment = obj.getBoolean("attachment");
-      String format = obj.getString("format");  
+      Boolean ssl = obj.getBoolean("ssl");
+      String format = obj.getString("format");
+      ReadableArray img = obj.getArray("img");
 
-      @Override
-      public void run() {
-        StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitAll().build();
-        StrictMode.setThreadPolicy(policy); 
-        try {
-          GMailSender sender = new GMailSender(username, password, mailhost, port);
-          sender.sendMail(subject, body, from, to, attachment, format);
-          WritableMap result = Arguments.createMap();
+        @Override
+        public void run() {
+          try {
+            GMailSender sender = new GMailSender();
+            sender.sendMail(username, password, mailhost, port, ssl, 
+              subject, body, from, recipients, attachment, format, img);
+            WritableMap result = Arguments.createMap();
             result.putString("status", "SUCCESS");
             promise.resolve(result);
-        } catch (Exception e) {
-          promise.reject("status", e.getMessage());
+          } catch (Exception e) {
+            promise.reject("status", e.getLocalizedMessage());
+          } finally {
+          }
         }
-      }
     });
   }
 }
 
-class ByteArrayDataSource implements DataSource {
-  private byte[] data;
-  private String type;
+class GMailSender {
  
-  public ByteArrayDataSource(byte[] data, String type) {
-    super();
-    this.data = data;
-    this.type = type;
-  }
- 
-  public ByteArrayDataSource(byte[] data) {
-    super();
-    this.data = data;
-  }
- 
-  public void setType(String type) {
-    this.type = type;
-  }
- 
-  public String getContentType() {
-    if (type == null)
-      return "application/octet-stream";
-    else
-      return type;
-  }
- 
-  public InputStream getInputStream() throws IOException {
-    return new ByteArrayInputStream(data);
-  }
- 
-  public String getName() {
-    return "ByteArrayDataSource";
-  }
- 
-  public OutputStream getOutputStream() throws IOException {
-    throw new IOException("Not Supported");
-  }
-}
-
-class GMailSender extends javax.mail.Authenticator {
-
-  private String user;
-  private String password;
-  private Session session;
- 
-  static {
-    Security.addProvider(new JSSEProvider());
-  }
- 
-  public GMailSender(String user, String password, String mailhost, String port) {
-
-    this.user = user;
-    this.password = password;
-
-    Properties props = new Properties();
-    props.setProperty("mail.transport.protocol", "smtp");
-    props.setProperty("mail.host", mailhost);
-    props.put("mail.smtp.auth", "true");
-    props.put("mail.smtp.port", port);
-    props.put("mail.smtp.socketFactory.port", port);
-    props.put("mail.smtp.socketFactory.class", "javax.net.ssl.SSLSocketFactory");
-    props.put("mail.smtp.socketFactory.fallback", "false");
-    props.setProperty("mail.smtp.quitwait", "false");
-
-    session = Session.getDefaultInstance(props, this);
+  public GMailSender() {
   }
 
-  protected PasswordAuthentication getPasswordAuthentication() {
-    return new PasswordAuthentication(user, password);
-  }
+  public synchronized void sendMail(
+    final String username, final String password, String mailhost, String port, Boolean ssl,
+    String subject, String body,
+    String sender, String recipients, Boolean attachment, String format, 
+    ReadableArray img ) throws Exception {
+      String xml = new String("XML");
+      Properties props = new Properties();
+      props.put("mail.transport.protocol", "smtp");
+      props.put("mail.smtp.host", mailhost);
+      props.put("mail.smtp.port", port);
+      props.put("mail.smtp.ssl.enable", "true");
+      props.put("mail.smtp.auth", "true");
+      Session session = Session.getInstance(props);
+      MimeMessage msg = new MimeMessage(session);
+      Multipart multipart = new MimeMultipart("mixed");
+      Transport transport = session.getTransport();
 
-  public synchronized void sendMail(String subject, String body,
-    String sender, String recipients, Boolean attachment, String format) throws Exception {
+      msg.setSender(new InternetAddress(sender));
+      msg.setSubject(subject);
 
-    String xml = new String("XML");
-    MimeMessage msg = new MimeMessage(session);
-    Multipart multipart = new MimeMultipart();
-    MimeBodyPart part = new MimeBodyPart();
+      MimeBodyPart bodyPart = new MimeBodyPart();
+      if (attachment) {
+        bodyPart.setText(body);
+        if (format.equals(xml)) {
+          bodyPart.setHeader("Content-Type", "text/xml; name=\"form.xml\"");
+        } else {
+          bodyPart.setHeader("Content-Type", "application/json; name=\"form.json\"");
+        }
+      } 
+      multipart.addBodyPart(bodyPart);
 
-    msg.setSender(new InternetAddress(sender));
-    msg.setSubject(subject);
-
-    if (attachment) {
-      part.setText(body);
-      if (format.equals(xml)) {
-        part.setHeader("Content-Type", "text/xml; name=\"form.xml\"");
-      } else {
-        part.setHeader("Content-Type", "application/json; name=\"form.json\"");
+      Integer size = img.size();
+      for (int i = 0; i < size; i++) {
+        MimeBodyPart attachmentPart = new MimeBodyPart();
+        FileDataSource fileDataSource = new FileDataSource(img.getString(i));
+        attachmentPart.setDataHandler(new DataHandler(fileDataSource));
+        attachmentPart.setFileName(fileDataSource.getName());  
+        attachmentPart.setHeader("Content-Type", "application/octet-stream"); 
+        multipart.addBodyPart(attachmentPart);
       }
-    } else {
-      part.setText(body);
+
+      msg.setContent(multipart);
+
+      msg.setRecipients(Message.RecipientType.TO, InternetAddress.parse(recipients));
+
+      transport.connect(mailhost, username, password);
+      transport.sendMessage(msg, msg.getAllRecipients());
+      transport.close();
     }
-    
-    multipart.addBodyPart(part);
-
-    msg.setRecipients(Message.RecipientType.TO, InternetAddress.parse(recipients));
-
-    
-    msg.setContent(multipart);
-    Transport.send(msg);
-  }
-}
-
-class JSSEProvider extends Provider { 
-  public JSSEProvider() {
-    super("HarmonyJSSE", 1.0, "Harmony JSSE Provider");
-    AccessController.doPrivileged(new java.security.PrivilegedAction<Void>() {
-      public Void run() {
-        put("SSLContext.TLS", "org.apache.harmony.xnet.provider.jsse.SSLContextImpl");
-        put("Alg.Alias.SSLContext.TLSv1", "TLS");
-        put("KeyManagerFactory.X509", "org.apache.harmony.xnet.provider.jsse.KeyManagerFactoryImpl");
-        put("TrustManagerFactory.X509", "org.apache.harmony.xnet.provider.jsse.TrustManagerFactoryImpl");
-        return null;
-      }
-    });
-  }
 }
